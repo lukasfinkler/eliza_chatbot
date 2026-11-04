@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dialogautomat nach dem Vorbild von ELIZA</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #f8fafc;
+      color: #13192b;
+    }
+
+    /* Schöne Scrollbar für das Chat-Fenster */
+    .chat-scroll::-webkit-scrollbar {
+      width: 6px;
+    }
+    .chat-scroll::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 8px;
+    }
+    .chat-scroll::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+    }
+    .chat-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.35);
+    }
+
+    /* sanfte Einblend-Animation für neue Chat-Blasen */
+    @keyframes popIn {
+      0% {
+        opacity: 0;
+        transform: translateY(8px) scale(0.98);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+    .msg-animate {
+      animation: popIn 0.22s ease-out forwards;
+    }
+
+    /* Hervorhebung für die aktuell prüfende & gewinnende Regel in der Tabelle */
+    .rule-checking {
+      background-color: #fef9c3 !important; /* sanftes Gelb beim Durchlaufen */
+      transition: background-color 0.15s ease;
+    }
+    .rule-matched {
+      background-color: #e0f2fe !important; /* hellblau bei Treffer */
+      box-shadow: inset 4px 0 0 #0284c7;
+      transition: all 0.25s ease;
+    }
+    .rule-matched- wildcard-highlight {
+      color: #0369a1;
+      font-weight: 700;
+    }
+
+    /* Wackel-Animation bei falschem Passwort */
+    @keyframes shakeError {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-6px); }
+      40%, 80% { transform: translateX(6px); }
+    }
+    .shake-animate {
+      animation: shakeError 0.35s ease-in-out;
+    }
+
+    /* Sanftes Einblenden beim Freischalten der Kulissen */
+    @keyframes revealFadeIn {
+      0% {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    .reveal-animate {
+      animation: revealFadeIn 0.35s ease-out forwards;
+    }
+  </style>
+</head>
+<body class="min-h-screen py-6 px-3 sm:px-6 lg:px-8 flex flex-col justify-center items-center">
+
+  <!-- Haupt-Container (Abgerundete weiße Karte wie in der Vorlage) -->
+  <main class="w-full max-w-6xl bg-white rounded-[28px] shadow-sm border border-slate-200/80 p-5 sm:p-8 lg:p-11">
+    
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+      
+      <!-- ================= LINKE SPALTE: CHAT-BEREICH ================= -->
+      <section class="lg:col-span-5 flex flex-col" aria-label="Chat-Bereich">
+        
+        <!-- Blaugraue/Petrol Überschrift -->
+        <h1 class="text-[#2b6cb0] text-xs sm:text-sm font-extrabold uppercase tracking-[0.08em] mb-3">
+          DIALOGAUTOMAT NACH DEM VORBILD VON ELIZA
+        </h1>
+
+        <!-- Dunkelblaues Chat-Fenster -->
+        <div 
+          id="chatContainer" 
+          class="bg-[#13192b] rounded-2xl p-4 sm:p-5 h-[390px] sm:h-[430px] overflow-y-auto chat-scroll flex flex-col space-y-4 shadow-inner"
+          role="log"
+          aria-live="polite"
+        >
+          <!-- Nachrichten werden per JavaScript eingefügt -->
+        </div>
+
+        <!-- Eingabe-Formular unter dem Chat -->
+        <form id="chatForm" class="mt-4 flex items-center gap-2.5" autocomplete="off">
+          <label for="userInput" class="sr-only">Nachricht an den Dialogautomaten</label>
+          <input 
+            id="userInput" 
+            type="text" 
+            placeholder="z. B. Ich bin heute müde." 
+            class="flex-1 min-w-0 bg-white border border-slate-300 rounded-xl px-4 py-3 text-[15px] text-[#13192b] placeholder-slate-400 focus:outline-none focus:border-[#0e7490] focus:ring-2 focus:ring-[#0e7490]/20 transition"
+            maxlength="200"
+          />
+          <button 
+            type="submit" 
+            id="sendBtn"
+            class="bg-[#13192b] hover:bg-[#1e2742] active:scale-[0.98] text-white font-bold text-[15px] px-6 py-3 rounded-full transition shadow-sm shrink-0"
+          >
+            Senden
+          </button>
+        </form>
+
+        <!-- Datenschutz- & Didaktik-Hinweis -->
+        <p class="mt-3 text-[13.5px] leading-relaxed text-slate-500">
+          Erzähl hier nichts Privates – teste den Automaten mit ausgedachten Sätzen. Das Gespräch wird nicht gespeichert.
+        </p>
+
+        <!-- Aktions-Buttons unten links -->
+        <div class="mt-4 flex flex-wrap items-center gap-3">
+          <button 
+            type="button" 
+            id="resetChatBtn"
+            class="bg-white hover:bg-slate-50 active:bg-slate-100 text-[#13192b] font-bold text-[14.5px] px-5 py-2.5 rounded-full border border-slate-300 transition"
+          >
+            Gespräch neu beginnen
+          </button>
+        </div>
+
+      </section>
+
+      <!-- ================= RECHTE SPALTE: PHASE 1 (BLACKBOX / FORSCHER-AUFTRAG) & PHASE 2 (REGELN) ================= -->
+      <section class="lg:col-span-7 flex flex-col" aria-label="Hinter den Kulissen">
+
+        <!-- PHASE 1: GESPERRTE MYSTERY-BOX (Vor dem Passwort) -->
+        <div id="lockedRulesPanel" class="bg-slate-50/90 border-2 border-dashed border-slate-300 rounded-2xl p-6 sm:p-9 flex flex-col justify-center min-h-[430px] relative overflow-hidden">
+          
+          <!-- Schloss-Icon -->
+          <div class="w-14 h-14 rounded-2xl bg-[#13192b] text-[#f4c44e] flex items-center justify-center shadow-sm mb-5">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+
+          <span class="text-xs font-extrabold uppercase tracking-wider text-[#2b6cb0] mb-1.5">
+            Phase 1: Ausprobieren &amp; Beobachten
+          </span>
+          <h2 class="text-[#13192b] text-xl sm:text-2xl font-extrabold tracking-tight">
+            Wie funktioniert dieser Chatbot?
+          </h2>
+
+          <p class="mt-3 text-[15px] leading-relaxed text-slate-600">
+            Probiere den Dialogautomaten links ausführlich aus! Wirkt er intelligent? Überlege dir, nach welchem Prinzip er seine Antworten bildet. Sobald deine Lehrkraft das Passwort bekanntgibt, kannst du hier hinter die Kulissen blicken.
+          </p>
+
+          <!-- Kleine Forscher-Fragen als Impuls -->
+          <div class="mt-5 bg-white rounded-xl p-4 border border-slate-200/90 space-y-2 text-[13.5px] text-slate-600">
+            <div class="font-bold text-[#13192b] flex items-center gap-1.5">
+              <span>🔍</span> Forscher-Tipps zum Testen:
+            </div>
+            <ul class="list-disc list-inside space-y-1 text-slate-600">
+              <li>Beginne Sätze mit <em class="text-slate-800 font-medium">„Ich bin …“</em>, <em class="text-slate-800 font-medium">„Ich mag …“</em> oder <em class="text-slate-800 font-medium">„Ich habe …“</em>.</li>
+              <li>Stelle eine Frage mit <em class="text-slate-800 font-medium">„Warum“</em> oder erwähne das Wort <em class="text-slate-800 font-medium">„Computer“</em>.</li>
+              <li>Was passiert, wenn du denselben Satz zweimal schickst oder Quatsch eingibst?</li>
+            </ul>
+          </div>
+
+          <!-- Passwort-Formular zum Freischalten -->
+          <form id="unlockForm" class="mt-6 pt-5 border-t border-slate-200/90" autocomplete="off">
+            <label for="passwordInput" class="block text-[13.5px] font-bold text-[#13192b] mb-2">
+              Freischaltcode der Lehrkraft eingeben:
+            </label>
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+              <input 
+                id="passwordInput" 
+                type="password" 
+                placeholder="Passwort eingeben …" 
+                class="flex-1 bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-[15px] text-[#13192b] placeholder-slate-400 focus:outline-none focus:border-[#0e7490] focus:ring-2 focus:ring-[#0e7490]/20 transition"
+              />
+              <button 
+                type="submit" 
+                class="bg-[#13192b] hover:bg-[#1e2742] active:scale-[0.98] text-white font-bold text-[14.5px] px-5 py-2.5 rounded-full transition shadow-sm shrink-0 flex items-center justify-center gap-2"
+              >
+                <span>Hinter die Kulissen schauen</span>
+              </button>
+            </div>
+            <p id="unlockErrorMsg" class="hidden mt-2 text-xs font-semibold text-rose-600">
+              Falsches Passwort. Frage deine Lehrkraft nach dem Freischaltcode.
+            </p>
+          </form>
+
+        </div>
+
+        <!-- PHASE 2: FREIGESCHALTETE REGELN DES AUTOMATEN -->
+        <div id="unlockedRulesPanel" class="hidden flex-col">
+          
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="text-[#13192b] text-xl sm:text-[22px] font-extrabold tracking-tight">
+              Regeln des Automaten
+            </h2>
+            <div class="flex flex-wrap items-center gap-2">
+              <span id="ruleStatusBadge" class="hidden text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-100 text-sky-800">
+                Bereit
+              </span>
+              <label class="inline-flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none py-1 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200/70 transition" title="Zeigt Schritt für Schritt in der Tabelle, wie der Automat von oben nach unten sucht">
+                <input type="checkbox" id="stepAnimationToggle" checked class="rounded text-[#2b6cb0] focus:ring-[#2b6cb0] h-3.5 w-3.5" />
+                <span>Regelprüfung Schritt für Schritt animieren</span>
+              </label>
+              <button 
+                type="button" 
+                id="lockAgainBtn"
+                class="text-xs font-semibold text-slate-600 hover:text-[#13192b] bg-slate-100 hover:bg-slate-200/80 px-2.5 py-1 rounded-lg transition"
+                title="Blendet die Regeln und Hinweise wieder aus"
+              >
+                Ansicht wieder sperren 🔒
+              </button>
+            </div>
+          </div>
+
+          <p class="mt-2 text-[14.5px] leading-relaxed text-slate-500">
+            Die Regeln werden von oben nach unten geprüft, die erste passende gewinnt. Der Stern <code class="font-bold text-slate-700">*</code> steht für den Rest des Satzes.
+          </p>
+
+          <!-- Regel-Tabelle -->
+          <div class="mt-4 overflow-hidden rounded-xl border border-slate-200/90">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-[#eef2f6] text-[#13192b] text-[11.5px] font-bold uppercase tracking-wider border-b border-slate-200">
+                  <th class="py-3.5 pl-4 pr-2 w-[38%]">WENN DIE EINGABE ...<br>ENTHÄLT</th>
+                  <th class="py-3.5 px-3">DANN ANTWORTE</th>
+                  <th class="py-3.5 pl-2 pr-3 text-right w-20" title="Reihenfolge ändern oder eigene Regeln löschen">Aktion</th>
+                </tr>
+              </thead>
+              <tbody id="rulesTableBody" class="divide-y divide-slate-200 text-[14.5px]">
+                <!-- Zeilen werden dynamisch per JavaScript gerendert -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Formular: Eigene Regel hinzufügen -->
+          <form id="addRuleForm" class="mt-6" autocomplete="off">
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-3.5">
+              
+              <!-- Eingabe: Schlüsselwort -->
+              <div class="sm:col-span-5">
+                <label for="keywordInput" class="block text-[13.5px] font-bold text-[#13192b] mb-1.5">
+                  Schlüsselwort
+                </label>
+                <input 
+                  id="keywordInput" 
+                  type="text" 
+                  placeholder="z. B. schule" 
+                  class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-[14.5px] text-[#13192b] placeholder-slate-400 focus:outline-none focus:border-[#0e7490] focus:ring-2 focus:ring-[#0e7490]/20 transition"
+                  maxlength="60"
+                />
+              </div>
+
+              <!-- Eingabe: Antwortmuster -->
+              <div class="sm:col-span-7">
+                <div class="flex items-center justify-between mb-1.5">
+                  <label for="patternInput" class="block text-[13.5px] font-bold text-[#13192b]">
+                    Antwortmuster
+                  </label>
+                  <button 
+                    type="button" 
+                    id="insertStarBtn"
+                    class="text-xs font-semibold text-[#0e7490] hover:underline"
+                    title="Fügt den Platzhalter * für den Satzrest ein"
+                  >
+                    + Stern (*) einfügen
+                  </button>
+                </div>
+                <input 
+                  id="patternInput" 
+                  type="text" 
+                  placeholder="z. B. Was magst du an der Schule?" 
+                  class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-[14.5px] text-[#13192b] placeholder-slate-400 focus:outline-none focus:border-[#0e7490] focus:ring-2 focus:ring-[#0e7490]/20 transition"
+                  maxlength="160"
+                />
+              </div>
+
+            </div>
+
+            <!-- Feedback-Meldung bei Fehlern (statt alert) -->
+            <div id="formErrorMsg" class="hidden mt-2 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"></div>
+
+            <p class="mt-2.5 text-[13.5px] text-slate-500">
+              Eigene Regeln werden im Browser gespeichert – trage nichts Persönliches ein.
+            </p>
+
+            <div class="mt-4 flex flex-wrap items-center gap-3">
+              <button 
+                type="submit" 
+                class="bg-[#13192b] hover:bg-[#1e2742] active:scale-[0.98] text-white font-bold text-[14.5px] px-6 py-3 rounded-full transition shadow-sm"
+              >
+                Eigene Regel hinzufügen
+              </button>
+
+              <button 
+                type="button" 
+                id="resetRulesBtn"
+                class="hidden text-xs font-semibold text-slate-500 hover:text-slate-800 underline px-2 py-1.5 transition"
+              >
+                Standardregeln wiederherstellen
+              </button>
+            </div>
+          </form>
+
+        </div>
+
+      </section>
+
+    </div>
+  </main>
+
+  <!-- Dezente Fußzeile mit Erklär-Tipp für den Unterricht -->
+  <footer class="w-full max-w-6xl mt-4 px-2 flex flex-wrap justify-between items-center text-xs text-slate-500 gap-2">
+    <div id="footerTipText">
+      <strong>Aufgabe:</strong> Teste den Chatbot mit verschiedenen Aussagen und Fragen. Findest du heraus, wie er seine Antworten erzeugt?
+    </div>
+    <div>
+      Interaktives Lernmodul • ELIZA (Joseph Weizenbaum, 1966)
+    </div>
+  </footer>
+
+  <!-- ================= JAVASCRIPT LOGIK ================= -->
+  <script>
+    // --- 1. STANDARD-REGELN (Exakt nach dem Screenshot) ---
+    const DEFAULT_RULES = [
+      { id: 'r1', keyword: 'ich bin', response: 'Warum bist du *?', isDefault: true },
+      { id: 'r2', keyword: 'ich mag', response: 'Was gefällt dir an *?', isDefault: true },
+      { id: 'r3', keyword: 'ich habe', response: 'Seit wann hast du *?', isDefault: true },
+      { id: 'r4', keyword: 'warum', response: 'Welche Antwort vermutest du selbst?', isDefault: true },
+      { id: 'r5', keyword: 'computer', response: 'Welche Erfahrungen hast du mit Computern?', isDefault: true },
+      { id: 'r6', keyword: 'nein', response: 'Warum nicht?', isDefault: true }
+    ];
+
+    // Abwechslungsreiche klassische ELIZA-Auffangantworten für die "sonst"-Regel
+    const FALLBACK_RESPONSES = [
+      'Erzähl mir mehr darüber.',
+      'Interessant – was bedeutet das für dich?',
+      'Wie fühlst du dich dabei?',
+      'Wie kommst du darauf?',
+      'Kannst du das genauer erklären?'
+    ];
+
+    const STORAGE_KEY = 'eliza_schul_regeln_v1';
+    const UNLOCK_PASSWORD = 'eliza';
+
+    // Aktueller Zustand
+    let rules = [];
+    let lastFallbackIndex = -1;
+    let isAnimatingCheck = false;
+    let activeMatchedRuleId = null; // Zu Beginn ist noch keine Regel ausgewählt
+    let isUnlocked = false; // Startet im Blackbox-Modus (gesperrt)
+
+    // DOM-Elemente
+    const chatContainer = document.getElementById('chatContainer');
+    const chatForm = document.getElementById('chatForm');
+    const userInput = document.getElementById('userInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const resetChatBtn = document.getElementById('resetChatBtn');
+    const stepAnimationToggle = document.getElementById('stepAnimationToggle');
+    const rulesTableBody = document.getElementById('rulesTableBody');
+    const ruleStatusBadge = document.getElementById('ruleStatusBadge');
+    const addRuleForm = document.getElementById('addRuleForm');
+    const keywordInput = document.getElementById('keywordInput');
+    const patternInput = document.getElementById('patternInput');
+    const insertStarBtn = document.getElementById('insertStarBtn');
+    const formErrorMsg = document.getElementById('formErrorMsg');
+    const resetRulesBtn = document.getElementById('resetRulesBtn');
+
+    // DOM-Elemente für den Passwortschutz / 2-Phasen-Modus
+    const lockedRulesPanel = document.getElementById('lockedRulesPanel');
+    const unlockedRulesPanel = document.getElementById('unlockedRulesPanel');
+    const unlockForm = document.getElementById('unlockForm');
+    const passwordInput = document.getElementById('passwordInput');
+    const unlockErrorMsg = document.getElementById('unlockErrorMsg');
+    const lockAgainBtn = document.getElementById('lockAgainBtn');
+    const footerTipText = document.getElementById('footerTipText');
+
+    // --- 2. INITIALISIERUNG ---
+    function init() {
+      loadRules();
+      renderRulesTable();
+      resetChat();
+    }
+
+    // Lädt Regeln aus dem LocalStorage oder nutzt die Standardregeln
+    function loadRules() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            rules = parsed;
+            updateResetRulesButtonVisibility();
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('LocalStorage konnte nicht gelesen werden:', e);
+      }
+      rules = JSON.parse(JSON.stringify(DEFAULT_RULES));
+      updateResetRulesButtonVisibility();
+    }
+
+    function saveRules() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(rules));
+      } catch (e) {
+        console.warn('LocalStorage konnte nicht gespeichert werden:', e);
+      }
+      updateResetRulesButtonVisibility();
+    }
+
+    // Prüft, ob die aktuellen Regeln von den Standardregeln abweichen
+    function updateResetRulesButtonVisibility() {
+      const currentJson = JSON.stringify(rules.map(r => ({ k: r.keyword, res: r.response })));
+      const defaultJson = JSON.stringify(DEFAULT_RULES.map(r => ({ k: r.keyword, res: r.response })));
+      if (currentJson !== defaultJson) {
+        resetRulesBtn.classList.remove('hidden');
+      } else {
+        resetRulesBtn.classList.add('hidden');
+      }
+    }
+
+    // --- 3. CHAT-DARSTELLUNG ---
+    // Setzt den Chat auf die reine Start-Begrüßung zurück
+    function resetChat() {
+      if (isAnimatingCheck) return;
+      chatContainer.innerHTML = '';
+      appendBotMessage('Hallo, ich bin ein Dialogautomat. Was beschäftigt dich?', 'Begrüßung', true);
+      activeMatchedRuleId = null;
+      clearRowHighlights();
+      ruleStatusBadge.classList.add('hidden');
+      userInput.focus();
+    }
+
+    // Fügt eine dunkle Bot-Sprechblase linksbündig hinzu
+    function appendBotMessage(text, ruleLabel, animate = true) {
+      const wrapper = document.createElement('div');
+      wrapper.className = `flex justify-start ${animate ? 'msg-animate' : ''}`;
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bg-[#262f45] text-white rounded-2xl px-4 py-3.5 max-w-[85%] shadow-sm';
+
+      const messageText = document.createElement('div');
+      messageText.className = 'font-bold text-[15.5px] sm:text-[16.5px] leading-snug break-words';
+      messageText.textContent = text;
+
+      // Hellblaues Regel-Tag: Im Blackbox-Modus (vor Passworteingabe) ausgeblendet!
+      const ruleSubtext = document.createElement('div');
+      ruleSubtext.className = `rule-subtext text-[#38bdf8] text-xs sm:text-[13px] font-medium mt-1.5 ${isUnlocked ? '' : 'hidden'}`;
+      ruleSubtext.textContent = ruleLabel;
+
+      bubble.appendChild(messageText);
+      bubble.appendChild(ruleSubtext);
+      wrapper.appendChild(bubble);
+      chatContainer.appendChild(wrapper);
+      scrollToBottom();
+    }
+
+    // Schaltet zwischen Phase 1 (Blackbox) und Phase 2 (Hinter den Kulissen) um
+    function setUnlockedState(unlock) {
+      isUnlocked = unlock;
+      const allRuleSubtexts = chatContainer.querySelectorAll('.rule-subtext');
+
+      if (isUnlocked) {
+        // Mystery-Box ausblenden, Regeltabelle einblenden
+        lockedRulesPanel.classList.add('hidden');
+        unlockedRulesPanel.classList.remove('hidden');
+        unlockedRulesPanel.classList.add('flex', 'reveal-animate');
+
+        // Aha-Effekt: Rückwirkend alle hellblauen Regel-Hinweise im bisherigen Chat einblenden!
+        allRuleSubtexts.forEach(el => el.classList.remove('hidden'));
+
+        // Falls bereits eine Nachricht geschickt wurde, passende Zeile in der Tabelle markieren
+        if (activeMatchedRuleId) {
+          highlightMatchedRow(activeMatchedRuleId);
+        }
+
+        // Fußzeile auf den Fortgeschrittenen-Tipp aktualisieren
+        footerTipText.innerHTML = '<strong>Tipp zum Ausprobieren:</strong> Gib einen Satz mit mehreren Schlüsselwörtern ein (z. B. <em>„Ich bin müde, weil mein Computer spinnt“</em>) und verschiebe die Regeln mit den Pfeilen <span class="font-semibold">↑ ↓</span>.';
+      } else {
+        // Wieder sperren
+        unlockedRulesPanel.classList.add('hidden');
+        unlockedRulesPanel.classList.remove('flex', 'reveal-animate');
+        lockedRulesPanel.classList.remove('hidden');
+
+        // Alle Regel-Hinweise in den Chat-Blasen wieder verstecken
+        allRuleSubtexts.forEach(el => el.classList.add('hidden'));
+
+        passwordInput.value = '';
+        unlockErrorMsg.classList.add('hidden');
+        footerTipText.innerHTML = '<strong>Aufgabe:</strong> Teste den Chatbot mit verschiedenen Aussagen und Fragen. Findest du heraus, wie er seine Antworten erzeugt?';
+      }
+      scrollToBottom();
+    }
+
+    // Fügt eine gelbe Nutzer-Sprechblase rechtsbündig hinzu
+    function appendUserMessage(text, animate = true) {
+      const wrapper = document.createElement('div');
+      wrapper.className = `flex justify-end ${animate ? 'msg-animate' : ''}`;
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bg-[#f4c44e] text-[#13192b] font-bold text-[15.5px] sm:text-[16px] rounded-[20px] px-4 py-3 max-w-[82%] shadow-sm break-words';
+      bubble.textContent = text;
+
+      wrapper.appendChild(bubble);
+      chatContainer.appendChild(wrapper);
+      scrollToBottom();
+    }
+
+    function scrollToBottom() {
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    // --- 4. REGEL-TABELLE RENDERN ---
+    function renderRulesTable() {
+      rulesTableBody.innerHTML = '';
+
+      rules.forEach((rule, index) => {
+        const tr = document.createElement('tr');
+        tr.id = `row-${rule.id}`;
+        tr.className = 'bg-white hover:bg-slate-50/80 transition-colors group';
+
+        // Spalte 1: Nummer + Schlüsselwort
+        const tdKeyword = document.createElement('td');
+        tdKeyword.className = 'py-3 pl-4 pr-2 align-top text-slate-700';
+        tdKeyword.innerHTML = `<span class="font-bold text-[#13192b]">${index + 1}.</span> ${escapeHtml(rule.keyword)}`;
+
+        // Spalte 2: Antwortmuster (Stern * optisch leicht betont)
+        const tdResponse = document.createElement('td');
+        tdResponse.className = 'py-3 px-3 align-top text-slate-600';
+        tdResponse.innerHTML = formatResponsePattern(rule.response);
+
+        // Spalte 3: Pfeile zum Verschieben (Priorität testen) & Löschen für eigene Regeln
+        const tdActions = document.createElement('td');
+        tdActions.className = 'py-2.5 pl-1 pr-3 align-top text-right whitespace-nowrap';
+
+        const btnUp = document.createElement('button');
+        btnUp.type = 'button';
+        btnUp.className = `p-1 rounded hover:bg-slate-200 text-slate-400 hover:text-slate-700 transition ${index === 0 ? 'opacity-25 pointer-events-none' : ''}`;
+        btnUp.title = 'Regel nach oben schieben (höhere Priorität)';
+        btnUp.innerHTML = '↑';
+        btnUp.onclick = () => moveRule(index, -1);
+
+        const btnDown = document.createElement('button');
+        btnDown.type = 'button';
+        btnDown.className = `p-1 rounded hover:bg-slate-200 text-slate-400 hover:text-slate-700 transition ${index === rules.length - 1 ? 'opacity-25 pointer-events-none' : ''}`;
+        btnDown.title = 'Regel nach unten schieben (niedrigere Priorität)';
+        btnDown.innerHTML = '↓';
+        btnDown.onclick = () => moveRule(index, 1);
+
+        tdActions.appendChild(btnUp);
+        tdActions.appendChild(btnDown);
+
+        // Löschen-Button (für eigene Regeln oder wenn mehr als 1 Regel existiert)
+        if (!rule.isDefault) {
+          const btnDelete = document.createElement('button');
+          btnDelete.type = 'button';
+          btnDelete.className = 'p-1 ml-0.5 rounded hover:bg-rose-100 text-slate-400 hover:text-rose-600 transition';
+          btnDelete.title = 'Eigene Regel löschen';
+          btnDelete.innerHTML = '✕';
+          btnDelete.onclick = () => deleteRule(index);
+          tdActions.appendChild(btnDelete);
+        }
+
+        tr.appendChild(tdKeyword);
+        tr.appendChild(tdResponse);
+        tr.appendChild(tdActions);
+        rulesTableBody.appendChild(tr);
+      });
+
+      // Letzte Zeile: "sonst" -> "Auffangantwort" (immer ganz unten)
+      const trFallback = document.createElement('tr');
+      trFallback.id = 'row-fallback';
+      trFallback.className = 'bg-white hover:bg-slate-50/80 transition-colors';
+      trFallback.innerHTML = `
+        <td class="py-3 pl-4 pr-2 align-top font-bold text-[#13192b]">sonst</td>
+        <td class="py-3 px-3 align-top text-slate-500" colspan="2">
+          <span class="border-b border-dotted border-slate-400 cursor-help" title="Greift, wenn keines der Schlüsselwörter oben im Satz vorkommt (z. B. „Erzähl mir mehr darüber.“)">
+            Auffangantwort
+          </span>
+        </td>
+      `;
+      rulesTableBody.appendChild(trFallback);
+
+      if (activeMatchedRuleId) {
+        highlightMatchedRow(activeMatchedRuleId);
+      }
+    }
+
+    function formatResponsePattern(text) {
+      const escaped = escapeHtml(text);
+      return escaped.replace(/\*/g, '<span class="font-bold text-[#0e7490] bg-cyan-50 px-1 rounded" title="Hier wird der Rest deines Satzes eingesetzt">*</span>');
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // Verschiebt eine Regel nach oben oder unten, damit Schüler die Priorität erforschen können
+    function moveRule(index, direction) {
+      if (isAnimatingCheck) return;
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= rules.length) return;
+      const temp = rules[index];
+      rules[index] = rules[targetIndex];
+      rules[targetIndex] = temp;
+      saveRules();
+      renderRulesTable();
+    }
+
+    function deleteRule(index) {
+      if (isAnimatingCheck) return;
+      const removed = rules[index];
+      rules.splice(index, 1);
+      if (activeMatchedRuleId === removed.id) {
+        activeMatchedRuleId = null;
+      }
+      saveRules();
+      renderRulesTable();
+    }
+
+    // --- 5. ELIZA TEXTVERARBEITUNG & WILDCARD (*) LOGIK ---
+    // Spiegelt deutsche Pronomen im extrahierten Satzrest (Ich -> Du, mein -> dein, mir -> dir ...)
+    function reflectGermanPronouns(restText) {
+      const replacements = [
+        { pattern: /\bich\b/gi, replacement: 'du' },
+        { pattern: /\bmich\b/gi, replacement: 'dich' },
+        { pattern: /\bmir\b/gi, replacement: 'dir' },
+        { pattern: /\bmein\b/gi, replacement: 'dein' },
+        { pattern: /\bmeine\b/gi, replacement: 'deine' },
+        { pattern: /\bmeinen\b/gi, replacement: 'deinen' },
+        { pattern: /\bmeinem\b/gi, replacement: 'deinem' },
+        { pattern: /\bmeiner\b/gi, replacement: 'deiner' },
+        { pattern: /\bmeines\b/gi, replacement: 'deines' },
+        { pattern: /\bbin\b/gi, replacement: 'bist' },
+        { pattern: /\bhabe\b/gi, replacement: 'hast' },
+        { pattern: /\bkann\b/gi, replacement: 'kannst' },
+        { pattern: /\bmuss\b/gi, replacement: 'musst' },
+        { pattern: /\bwill\b/gi, replacement: 'willst' }
+      ];
+
+      // Token-basierte Ersetzung verhindert, dass ein bereits ersetztes Wort nochmal ersetzt wird
+      return restText.split(/(\s+)/).map(token => {
+        for (const item of replacements) {
+          if (item.pattern.test(token)) {
+            return token.replace(item.pattern, item.replacement);
+          }
+        }
+        return token;
+      }).join('');
+    }
+
+    // Erzeugt die Antwort anhand der gefundenen Regel und der Nutzereingabe
+    function buildBotResponse(userText, rule) {
+      const lowerUser = userText.toLowerCase();
+      const lowerKeyword = rule.keyword.toLowerCase().trim();
+      const matchIndex = lowerUser.indexOf(lowerKeyword);
+
+      // Falls das Antwortmuster keinen Stern * enthält, direkt zurückgeben
+      if (!rule.response.includes('*')) {
+        return rule.response;
+      }
+
+      // Alles NACH dem Schlüsselwort ausschneiden
+      let rest = '';
+      if (matchIndex !== -1) {
+        rest = userText.substring(matchIndex + lowerKeyword.length);
+      }
+
+      // Satzzeichen am Ende (. ! ? , ;) und überflüssige Leerzeichen entfernen
+      rest = rest.replace(/[.!?,;:\s]+$/g, '').trim();
+
+      // Falls nach dem Schlüsselwort noch ein Nebensatz mit Komma oder Punkt folgt, optional alles sauber halten
+      if (!rest) {
+        // Fallback, falls der Nutzer NUR das Schlüsselwort eingegeben hat (z.B. nur "ich bin")
+        return rule.response
+          .replace(/\s*\*\s*/g, ' das')
+          .replace(/\s+\?/g, '?');
+      }
+
+      // Ersten Buchstaben des Restsatzes klein machen, falls es kein Nomen ist (einfache Heuristik: Pronomen/Adjektive am Satzanfang)
+      const reflectedRest = reflectGermanPronouns(rest);
+
+      return rule.response.replace(/\*/g, reflectedRest);
+    }
+
+    // Wählt eine abwechslungsreiche Auffangantwort aus
+    function getNextFallbackResponse() {
+      let idx;
+      do {
+        idx = Math.floor(Math.random() * FALLBACK_RESPONSES.length);
+      } while (idx === lastFallbackIndex && FALLBACK_RESPONSES.length > 1);
+      lastFallbackIndex = idx;
+      return FALLBACK_RESPONSES[idx];
+    }
+
+    // Findet die erste passende Regel von oben nach unten
+    function evaluateRules(userText) {
+      const lowerInput = userText.toLowerCase();
+
+      for (let i = 0; i < rules.length; i++) {
+        const rule = rules[i];
+        const kw = rule.keyword.toLowerCase().trim();
+        if (kw && lowerInput.includes(kw)) {
+          return {
+            matchedIndex: i,
+            rule: rule,
+            replyText: buildBotResponse(userText, rule),
+            ruleLabel: `Regel ${i + 1}: „${rule.keyword}“`
+          };
+        }
+      }
+
+      // Keine Regel hat gepasst -> "sonst" (Auffangantwort)
+      return {
+        matchedIndex: rules.length, // Index für die "sonst"-Zeile
+        rule: null,
+        replyText: getNextFallbackResponse(),
+        ruleLabel: 'Regel: sonst (Auffangantwort)'
+      };
+    }
+
+    // --- 6. VISUELLE REGEL-PRÜFUNG (DIDAKTIK-ANIMATION) ---
+    function clearRowHighlights() {
+      const allRows = rulesTableBody.querySelectorAll('tr');
+      allRows.forEach(r => {
+        r.classList.remove('rule-checking', 'rule-matched');
+      });
+    }
+
+    function highlightMatchedRow(ruleId) {
+      clearRowHighlights();
+      activeMatchedRuleId = ruleId;
+      const targetRow = ruleId === 'fallback'
+        ? document.getElementById('row-fallback')
+        : document.getElementById(`row-${ruleId}`);
+      if (targetRow) {
+        targetRow.classList.add('rule-matched');
+      }
+    }
+
+    async function animateRuleSearchAndRespond(userText) {
+      const result = evaluateRules(userText);
+      const targetId = result.rule ? result.rule.id : 'fallback';
+      activeMatchedRuleId = targetId;
+
+      // Im gesperrten Blackbox-Modus oder wenn die Animation deaktiviert ist: Direkt antworten
+      if (!isUnlocked || !stepAnimationToggle.checked) {
+        if (isUnlocked) {
+          highlightMatchedRow(targetId);
+          showStatusBadge(result.ruleLabel);
+        }
+        appendBotMessage(result.replyText, result.ruleLabel, true);
+        return;
+      }
+
+      // Freigeschaltet & Animation aktiv: Schrittweise von Regel 1 bis zum Treffer durchlaufen
+      isAnimatingCheck = true;
+      sendBtn.disabled = true;
+      clearRowHighlights();
+
+      for (let i = 0; i <= result.matchedIndex; i++) {
+        clearRowHighlights();
+        const isFallbackStep = i === rules.length;
+        const currentRow = isFallbackStep
+          ? document.getElementById('row-fallback')
+          : document.getElementById(`row-${rules[i].id}`);
+
+        if (currentRow) {
+          if (i === result.matchedIndex) {
+            // Treffer!
+            currentRow.classList.add('rule-matched');
+            activeMatchedRuleId = isFallbackStep ? 'fallback' : rules[i].id;
+            showStatusBadge(`Treffer: ${result.ruleLabel}`);
+          } else {
+            // Wird gerade geprüft, passt aber nicht
+            currentRow.classList.add('rule-checking');
+            showStatusBadge(`Prüfe Regel ${i + 1} …`);
+            await sleep(220);
+          }
+        }
+      }
+
+      appendBotMessage(result.replyText, result.ruleLabel, true);
+      isAnimatingCheck = false;
+      sendBtn.disabled = false;
+      userInput.focus();
+    }
+
+    function showStatusBadge(text) {
+      ruleStatusBadge.textContent = text;
+      ruleStatusBadge.classList.remove('hidden');
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // --- 7. EVENT LISTENER ---
+    // Nachricht absenden
+    chatForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (isAnimatingCheck) return;
+
+      const text = userInput.value.trim();
+      if (!text) {
+        userInput.focus();
+        return;
+      }
+
+      userInput.value = '';
+      appendUserMessage(text, true);
+      await animateRuleSearchAndRespond(text);
+    });
+
+    // Gespräch neu beginnen
+    resetChatBtn.addEventListener('click', () => {
+      resetChat();
+    });
+
+    // Passwort-Formular zum Freischalten der Regeln ("eliza")
+    unlockForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const entered = passwordInput.value.trim().toLowerCase();
+
+      if (entered === UNLOCK_PASSWORD) {
+        unlockErrorMsg.classList.add('hidden');
+        setUnlockedState(true);
+      } else {
+        unlockErrorMsg.classList.remove('hidden');
+        passwordInput.classList.remove('shake-animate');
+        // Reflow auslösen, damit die Wackel-Animation bei jedem Fehlversuch erneut abspielt
+        void passwordInput.offsetWidth;
+        passwordInput.classList.add('shake-animate');
+        passwordInput.focus();
+        passwordInput.select();
+      }
+    });
+
+    // Ansicht wieder sperren
+    lockAgainBtn.addEventListener('click', () => {
+      if (isAnimatingCheck) return;
+      setUnlockedState(false);
+    });
+
+    // "+ Stern (*) einfügen" Hilfsbutton
+    insertStarBtn.addEventListener('click', () => {
+      const start = patternInput.selectionStart ?? patternInput.value.length;
+      const end = patternInput.selectionEnd ?? patternInput.value.length;
+      const current = patternInput.value;
+      patternInput.value = current.substring(0, start) + '*' + current.substring(end);
+      patternInput.focus();
+      patternInput.setSelectionRange(start + 1, start + 1);
+    });
+
+    // Eigene Regel hinzufügen
+    addRuleForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      formErrorMsg.classList.add('hidden');
+
+      const keyword = keywordInput.value.trim().toLowerCase();
+      const response = patternInput.value.trim();
+
+      if (!keyword || !response) {
+        showFormError('Bitte gib sowohl ein Schlüsselwort als auch ein Antwortmuster ein.');
+        return;
+      }
+
+      if (keyword === 'sonst') {
+        showFormError('„sonst“ ist bereits als Auffangregel am Ende reserviert.');
+        return;
+      }
+
+      const newRule = {
+        id: 'custom_' + Date.now(),
+        keyword: keyword,
+        response: response,
+        isDefault: false
+      };
+
+      rules.push(newRule);
+      saveRules();
+      renderRulesTable();
+      highlightMatchedRow(newRule.id);
+      showStatusBadge(`Neue Regel ${rules.length} hinzugefügt`);
+
+      keywordInput.value = '';
+      patternInput.value = '';
+      keywordInput.focus();
+    });
+
+    // Standardregeln wiederherstellen
+    resetRulesBtn.addEventListener('click', () => {
+      if (isAnimatingCheck) return;
+      rules = JSON.parse(JSON.stringify(DEFAULT_RULES));
+      activeMatchedRuleId = null;
+      saveRules();
+      renderRulesTable();
+      showStatusBadge('Standardregeln wiederhergestellt');
+    });
+
+    function showFormError(msg) {
+      formErrorMsg.textContent = msg;
+      formErrorMsg.classList.remove('hidden');
+    }
+
+    // Starten
+    window.onload = init;
+  </script>
+</body>
+</html>
